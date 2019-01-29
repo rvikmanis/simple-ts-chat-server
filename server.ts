@@ -31,21 +31,64 @@ function updateInactivityTimer(nick: string) {
   clientInactivityTimers.set(nick, timer);
 }
 
-io.on('connection', (socket: Socket) => {
-  console.log('a user connected');
+interface JoinLine {
+  type: "join";
+  time: number;
+  user: string;
+}
+
+interface QuitLine {
+  type: "quit";
+  time: number;
+  user: string;
+}
+
+interface MessageLine {
+  type: "message";
+  time: number;
+  from: string;
+  text: string;
+}
+
+type Line =
+  | JoinLine
+  | QuitLine
+  | MessageLine
+
+function formatLine(line: Line) {
+  const time = new Date(line.time).toLocaleString();
   
-  socket.on('setNick', (nick: string) => {
-    console.log(`received nick: ${nick}`);
-    
+  if (line.type === "join") {
+    return `[${time}] ${line.user} joined`
+  }
+
+  if (line.type === "quit") {
+    return `[${time}] ${line.user} quit`
+  }
+
+  if (line.type === "message") {
+    return `[${time}] <${line.from}>: ${line.text}`
+  }
+}
+
+function log(line: Line) {
+  console.log(formatLine(line));
+}
+
+io.on('connection', (socket: Socket) => {
+  
+  socket.on('setNick', (nick: string) => {    
     if (!nicksToSockets.has(nick)) {
       nicksToSockets.set(nick, socket);
       socket.nick = nick;
       socket.emit('nickOk');
-      socket.broadcast.emit('line', {
+      const line = {
         type: "join",
         time: new Date().valueOf(),
         user: nick
-      });
+      } as JoinLine;
+      socket.broadcast.emit('line', line);
+      log(line);
       updateInactivityTimer(nick);
     } else {
       socket.emit('nickTaken');
@@ -56,33 +99,42 @@ io.on('connection', (socket: Socket) => {
   socket.on('message', (text: string) => {
     if (socket.nick) {
       updateInactivityTimer(socket.nick);
-      socket.broadcast.emit('line', {
+      const line = {
         type: "message",
         time: new Date().valueOf(),
         from: socket.nick,
         text: text
-      });
-      console.log(`received message from ${socket.nick}: ${text}`);
-    } else {
-      console.log(`received message from unauthorized socket: ${text}`);
+      } as MessageLine;
+      socket.broadcast.emit('line', line);
+      log(line);
     }
   });
 
   socket.on('disconnect', () => {
     if (socket.nick) {
-      console.log(`user (${socket.nick}) disconnected`);
       nicksToSockets.delete(socket.nick);
-      socket.broadcast.emit('line', {
+      const line = {
         type: "quit",
         time: new Date().valueOf(),
         user: socket.nick
-      });
-    } else {
-      console.log('a user disconnected');
+      } as QuitLine;
+      socket.broadcast.emit('line', line);
+      log(line);
     }
-  })
+  });
+
 });
 
 http.listen(3001, function(){
-  console.log('listening on *:3001');
+  console.log(`[${new Date().toLocaleString()}] Listening on *:3001`);
 });
+
+function killHandler() {
+  io.emit('serverShutdown');
+  console.log(`[${new Date().toLocaleString()}] Server shut down`)
+  http.close();
+  process.exit();
+}
+
+process.on('SIGINT', killHandler);
+process.on('SIGTERM', killHandler);
