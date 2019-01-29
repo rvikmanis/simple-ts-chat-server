@@ -1,14 +1,37 @@
 import express from "express";
 import { Server } from "http";
 import SocketIO from "socket.io";
+import { CLIENT_INACTIVITY_TIMEOUT } from "./config";
+
+const clientInactivityTimeout = CLIENT_INACTIVITY_TIMEOUT * 1000;
 
 const app = express();
 const http = new Server(app);
 const io = SocketIO(http);
 
-const nicksToSockets = new Map();
+type Socket = SocketIO.Socket & { nick?: string };
 
-io.on('connection', (socket: SocketIO.Socket & { nick?: string }) => {
+const nicksToSockets = new Map<string, Socket>();
+const clientInactivityTimers = new Map<string, NodeJS.Timeout>();
+
+function updateInactivityTimer(nick: string) {
+  const previousTimer = clientInactivityTimers.get(nick);
+  if (previousTimer) {
+    clearTimeout(previousTimer);
+  }
+
+  const timer = setTimeout(() => {
+    clientInactivityTimers.delete(nick);
+    const socket = nicksToSockets.get(nick);
+    if (socket) {
+      socket.disconnect(true);
+    }
+  }, clientInactivityTimeout);
+
+  clientInactivityTimers.set(nick, timer);
+}
+
+io.on('connection', (socket: Socket) => {
   console.log('a user connected');
   
   socket.on('setNick', (nick: string) => {
@@ -23,10 +46,26 @@ io.on('connection', (socket: SocketIO.Socket & { nick?: string }) => {
         time: new Date().valueOf(),
         user: nick
       });
+      updateInactivityTimer(nick);
     } else {
       socket.emit('nickTaken');
     }
 
+  });
+
+  socket.on('message', (text: string) => {
+    if (socket.nick) {
+      updateInactivityTimer(socket.nick);
+      socket.broadcast.emit('line', {
+        type: "message",
+        time: new Date().valueOf(),
+        from: socket.nick,
+        text: text
+      });
+      console.log(`received message from ${socket.nick}: ${text}`);
+    } else {
+      console.log(`received message from unauthorized socket: ${text}`);
+    }
   });
 
   socket.on('disconnect', () => {
