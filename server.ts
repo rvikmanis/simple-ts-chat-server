@@ -77,7 +77,19 @@ function log(line: Line) {
 
 io.on('connection', (socket: Socket) => {
   
-  socket.on('setNick', (nick: string) => {    
+  socket.on('setNick', (nick: string) => {
+    if (typeof nick !== "string") {
+      console.error(`E [${new Date().toLocaleString()}] Someone requested a non-string nickname`);
+      return;
+    }
+
+    nick = nick.trim();
+
+    if (!nick) {
+      console.error(`E [${new Date().toLocaleString()}] Someone requested an empty nickname`);
+      return;
+    }
+    
     if (!nicksToSockets.has(nick)) {
       nicksToSockets.set(nick, socket);
       socket.nick = nick;
@@ -97,6 +109,18 @@ io.on('connection', (socket: Socket) => {
   });
 
   socket.on('message', (text: string) => {
+    if (typeof text !== "string") {
+      console.error(`E [${new Date().toLocaleString()}] ${socket.nick} sent a non-string message`);
+      return;
+    }
+
+    text = text.trim();
+
+    if (!text) {
+      console.error(`E [${new Date().toLocaleString()}] ${socket.nick} sent an empty message`);
+      return;
+    }
+
     if (socket.nick) {
       updateInactivityTimer(socket.nick);
       const line = {
